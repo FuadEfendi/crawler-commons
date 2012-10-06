@@ -35,13 +35,14 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
 import org.apache.http.Header;
+import org.apache.http.HeaderElement;
+import org.apache.http.HeaderElementIterator;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpEntityEnclosingRequest;
 import org.apache.http.HttpException;
@@ -56,7 +57,6 @@ import org.apache.http.HttpVersion;
 import org.apache.http.NoHttpResponseException;
 import org.apache.http.ProtocolException;
 import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.CookieStore;
 import org.apache.http.client.HttpRequestRetryHandler;
 import org.apache.http.client.RedirectException;
 import org.apache.http.client.methods.HttpGet;
@@ -65,32 +65,29 @@ import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.client.params.ClientParamBean;
 import org.apache.http.client.params.CookiePolicy;
 import org.apache.http.client.params.HttpClientParams;
-import org.apache.http.client.protocol.ClientContext;
+import org.apache.http.conn.ClientConnectionManager;
+import org.apache.http.conn.ConnectionKeepAliveStrategy;
 import org.apache.http.conn.ConnectionPoolTimeoutException;
-import org.apache.http.conn.params.ConnManagerParams;
-import org.apache.http.conn.params.ConnPerRouteBean;
 import org.apache.http.conn.scheme.PlainSocketFactory;
 import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.scheme.SchemeRegistry;
-import org.apache.http.conn.ssl.AbstractVerifier;
 import org.apache.http.conn.ssl.SSLSocketFactory;
 import org.apache.http.cookie.params.CookieSpecParamBean;
-import org.apache.http.impl.client.BasicCookieStore;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.impl.client.DefaultRedirectHandler;
+import org.apache.http.impl.conn.PoolingClientConnectionManager;
 import org.apache.http.impl.conn.tsccm.ThreadSafeClientConnManager;
 import org.apache.http.message.BasicHeader;
+import org.apache.http.message.BasicHeaderElementIterator;
 import org.apache.http.params.BasicHttpParams;
+import org.apache.http.params.CoreProtocolPNames;
 import org.apache.http.params.HttpConnectionParams;
 import org.apache.http.params.HttpParams;
 import org.apache.http.params.HttpProtocolParams;
-import org.apache.http.protocol.BasicHttpContext;
 import org.apache.http.protocol.ExecutionContext;
+import org.apache.http.protocol.HTTP;
 import org.apache.http.protocol.HttpContext;
 import org.apache.tika.metadata.Metadata;
-import org.apache.tika.mime.MediaType;
-import org.apache.tika.parser.ParseContext;
-import org.apache.tika.parser.Parser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -99,14 +96,14 @@ import crawlercommons.fetcher.AbortedFetchReason;
 import crawlercommons.fetcher.BadProtocolFetchException;
 import crawlercommons.fetcher.BaseFetchException;
 import crawlercommons.fetcher.EncodingUtils;
+import crawlercommons.fetcher.EncodingUtils.ExpandedResult;
 import crawlercommons.fetcher.FetchedResult;
 import crawlercommons.fetcher.HttpFetchException;
 import crawlercommons.fetcher.IOFetchException;
 import crawlercommons.fetcher.Payload;
 import crawlercommons.fetcher.RedirectFetchException;
-import crawlercommons.fetcher.UrlFetchException;
-import crawlercommons.fetcher.EncodingUtils.ExpandedResult;
 import crawlercommons.fetcher.RedirectFetchException.RedirectExceptionReason;
+import crawlercommons.fetcher.UrlFetchException;
 
 
 @SuppressWarnings("serial")
@@ -116,15 +113,16 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
     // We tried 10 seconds for all of these, but got a number of connection/read timeouts for
     // sites that would have eventually worked, so bumping it up to 30 seconds.
     private static final int DEFAULT_SOCKET_TIMEOUT = 30 * 1000;
-    private static final int DEFAULT_CONNECTION_TIMEOUT = 30 * 1000;
     
-    private static final int DEFAULT_MAX_THREADS = 1;
-    
-    // This normally don't ever hit this timeout, since we manage the number of
+    // As per HttpComponents v.4.2.1, this will also include timeout needed to get Connection from Pool. 
+    // From initial comment:
+    // "This normally don't ever hit this timeout, since we manage the number of
     // fetcher threads to be <= the maxThreads value used to configure an IHttpFetcher.
     // But the limit of connections/host can cause a timeout, when redirects cause
-    // multiple threads to hit the same domain. So jack the value way up.
-    private static final long CONNECTION_POOL_TIMEOUT = 100 * 1000L;
+    // multiple threads to hit the same domain. So jack the value way up."
+    private static final int DEFAULT_CONNECTION_TIMEOUT = 100 * 1000;
+    
+    private static final int DEFAULT_MAX_THREADS = 1;
     
     private static final int BUFFER_SIZE = 8 * 1024;
     private static final int DEFAULT_MAX_RETRY_COUNT = 10;
@@ -143,6 +141,15 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 	private static final String REDIRECT_COUNT_CONTEXT_KEY = "redirect-count";
 	private static final String HOST_ADDRESS = "host-address";
 
+	// To be polite, set it small; if we use it, we will use less than a second delay between subsequent fetches
+  private static final int DEFAULT_KEEP_ALIVE_DURATION = 5000;
+
+  private IdleConnectionMonitorThread monitor;
+  
+  // ThreadLocal replacement to traditional HttpContext
+  private static LocalHttpContext context = new LocalHttpContext();
+
+	
     private static final String SSL_CONTEXT_NAMES[] = {
         "TLS",
         "Default",
@@ -292,24 +299,6 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         }
     }
     
-    private static class DummyX509HostnameVerifier extends AbstractVerifier {
-
-        @Override
-        public void verify(String host, String[] cns, String[] subjectAlts) throws SSLException {
-            try {
-                verify(host, cns, subjectAlts, false);
-            } catch (SSLException e) {
-                LOGGER.warn("Invalid SSL certificate for " + host + ": " + e.getMessage());
-            }
-        }
-        
-        @Override
-        public final String toString() { 
-            return "DUMMY_VERIFIER"; 
-        }
-
-    }
-    
     private static class DummyX509TrustManager implements X509TrustManager {
         private X509TrustManager standardTrustManager = null;
 
@@ -360,6 +349,50 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         }
     }
 
+    public static class MyConnectionKeepAliveStrategy implements ConnectionKeepAliveStrategy {
+  
+        public long getKeepAliveDuration(HttpResponse response, HttpContext context) {
+            if (response == null) {
+                throw new IllegalArgumentException("HTTP response may not be null");
+            }
+            HeaderElementIterator it = new BasicHeaderElementIterator(response.headerIterator(HTTP.CONN_KEEP_ALIVE));
+            while (it.hasNext()) {
+                HeaderElement he = it.nextElement();
+                String param = he.getName();
+                String value = he.getValue();
+                if (value != null && param.equalsIgnoreCase("timeout")) {
+                    try {
+                        return Long.parseLong(value) * 1000;
+                    } catch (NumberFormatException ignore) {}
+                }
+            }
+            return DEFAULT_KEEP_ALIVE_DURATION;
+        }
+    }
+
+    public static class IdleConnectionMonitorThread extends Thread {
+      
+        private final ClientConnectionManager connMgr;
+       
+        public IdleConnectionMonitorThread(ClientConnectionManager connMgr) {
+            super();
+            this.connMgr = connMgr;
+            this.setDaemon(true);
+        }
+      
+        @Override
+        public void run() {
+            while (!interrupted()) {
+                // Close expired connections
+                connMgr.closeExpiredConnections();
+                // Optionally, close connections
+                // that have been idle longer than 30 sec
+                connMgr.closeIdleConnections(30, TimeUnit.SECONDS);
+            }
+        }      
+    }
+
+    
     public SimpleHttpFetcher(UserAgent userAgent) {
         this(DEFAULT_MAX_THREADS, userAgent);
     }
@@ -491,12 +524,6 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         String mimeType = "";
         String hostAddress = null;
         
-        // Create a local instance of cookie store, and bind to local context
-        // Without this we get killed w/lots of threads, due to sync() on single cookie store.
-        HttpContext localContext = new BasicHttpContext();
-        CookieStore cookieStore = new BasicCookieStore();
-        localContext.setAttribute(ClientContext.COOKIE_STORE, cookieStore);
-
         StringBuilder fetchTrace = null;
         if (LOGGER.isTraceEnabled()) {
             fetchTrace = new StringBuilder("Fetched url: " + url);
@@ -506,7 +533,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
             request.setURI(new URI(url));
             
             readStartTime = System.currentTimeMillis();
-            response = _httpClient.execute(request, localContext);
+            response = _httpClient.execute(request, context.get());
 
             Header[] headers = response.getAllHeaders();
             for (Header header : headers) {
@@ -530,19 +557,19 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                 throw new HttpFetchException(url, "Error fetching " + url, httpStatus, headerMap);
             }
 
-            redirectedUrl = extractRedirectedUrl(url, localContext);
+            redirectedUrl = extractRedirectedUrl(url, context.get());
 
-            URI permRedirectUri = (URI)localContext.getAttribute(PERM_REDIRECT_CONTEXT_KEY);
+            URI permRedirectUri = (URI)context.get().getAttribute(PERM_REDIRECT_CONTEXT_KEY);
             if (permRedirectUri != null) {
                 newBaseUrl = permRedirectUri.toURL().toExternalForm();
             }
 
-            Integer redirects = (Integer)localContext.getAttribute(REDIRECT_COUNT_CONTEXT_KEY);
+            Integer redirects = (Integer)context.get().getAttribute(REDIRECT_COUNT_CONTEXT_KEY);
             if (redirects != null) {
                 numRedirects = redirects.intValue();
             }
             
-            hostAddress = (String)(localContext.getAttribute(HOST_ADDRESS));
+            hostAddress = (String)(context.get().getAttribute(HOST_ADDRESS));
             if (hostAddress == null) {
                 throw new UrlFetchException(url, "Host address not saved in context");
             }
@@ -584,7 +611,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 
                 throw new RedirectFetchException(url, redirectUrl, mre.getReason());
             } else if (e.getCause() instanceof RedirectException) {
-                throw new RedirectFetchException(url, extractRedirectedUrl(url, localContext), RedirectExceptionReason.TOO_MANY_REDIRECTS);
+                throw new RedirectFetchException(url, extractRedirectedUrl(url, context.get()), RedirectExceptionReason.TOO_MANY_REDIRECTS);
             } else {
                 throw new IOFetchException(url, e);
             }
@@ -803,55 +830,100 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         }
     }
 
-    private synchronized void init() {
-        if (_httpClient == null) {
+    private void init() {
+      if (_httpClient == null) {
+        synchronized (SimpleHttpFetcher.class) {
+          if (_httpClient != null) return;
+
             // Create and initialize HTTP parameters
             HttpParams params = new BasicHttpParams();
-
-            // TODO KKr - w/4.1, switch to new api (ThreadSafeClientConnManager)
-            // cm.setMaxTotalConnections(_maxThreads);
-            // cm.setDefaultMaxPerRoute(Math.max(10, _maxThreads/10));
-            ConnManagerParams.setMaxTotalConnections(params, _maxThreads);
-            
-            // Set the maximum time we'll wait for a spare connection in the connection pool. We
-            // shouldn't actually hit this, as we make sure (in FetcherManager) that the max number
-            // of active requests doesn't exceed the value returned by getMaxThreads() here.
-            ConnManagerParams.setTimeout(params, CONNECTION_POOL_TIMEOUT);
-            
+             
             // Set the socket and connection timeout to be something reasonable.
             HttpConnectionParams.setSoTimeout(params, _socketTimeout);
             HttpConnectionParams.setConnectionTimeout(params, _connectionTimeout);
             
+            /*
+             * CoreConnectionPNames.TCP_NODELAY='http.tcp.nodelay': determines whether
+             * Nagle's algorithm is to be used. Nagle's algorithm tries to conserve
+             * bandwidth by minimizing the number of segments that are sent. When
+             * applications wish to decrease network latency and increase performance,
+             * they can disable Nagle's algorithm (that is enable TCP_NODELAY. Data will
+             * be sent earlier, at the cost of an increase in bandwidth consumption. This
+             * parameter expects a value of type java.lang.Boolean. If this parameter is
+             * not set, TCP_NODELAY will be enabled (no delay).
+             */
+            HttpConnectionParams.setTcpNoDelay(params, true);
+            
+            
+            /*
+             * CoreConnectionPNames.STALE_CONNECTION_CHECK='http.connection.stalecheck':
+             * determines whether stale connection check is to be used. Disabling stale
+             * connection check may result in a noticeable performance improvement (the
+             * check can cause up to 30 millisecond overhead per request) at the risk of
+             * getting an I/O error when executing a request over a connection that has
+             * been closed at the server side. This parameter expects a value of type
+             * java.lang.Boolean. For performance critical operations the check should be
+             * disabled. If this parameter is not set, the stale connection check will be
+             * performed before each request execution.
+             * 
+             * We don't need I/O exceptions in case if Server doesn't support Kee-Alive
+             * option; our client by default always tries keep-alive.
+             */
             // Even with stale checking enabled, a connection can "go stale" between the check and the
             // next request. So we still need to handle the case of a closed socket (from the server side),
             // and disabling this check improves performance.
             HttpConnectionParams.setStaleCheckingEnabled(params, false);
             
-            // FUTURE - set this on a per-route (host) basis when we have per-host policies for
-            // doing partner crawls. We could define a BixoConnPerRoute class that supports this.
-            ConnPerRouteBean connPerRoute = new ConnPerRouteBean(getMaxConnectionsPerHost());
-            ConnManagerParams.setMaxConnectionsPerRoute(params, connPerRoute);
-
             HttpProtocolParams.setVersion(params, _httpVersion);
             HttpProtocolParams.setUserAgent(params, _userAgent.getUserAgentString());
             HttpProtocolParams.setContentCharset(params, "UTF-8");
             HttpProtocolParams.setHttpElementCharset(params, "UTF-8");
+           
+            
+            /*
+             * CoreProtocolPNames.USE_EXPECT_CONTINUE=
+             * 'http.protocol.expect-continue': activates the Expect: 100-Continue
+             * handshake for the entity enclosing methods. The purpose of the
+             * Expect: 100-Continue handshake is to allow the client that is sending
+             * a request message with a request body to determine if the origin
+             * server is willing to accept the request (based on the request
+             * headers) before the client sends the request body. The use of the
+             * Expect: 100-continue handshake can result in a noticeable performance
+             * improvement for entity enclosing requests (such as POST and PUT) that
+             * require the target server's authentication. The Expect: 100-continue
+             * handshake should be used with caution, as it may cause problems with
+             * HTTP servers and proxies that do not support HTTP/1.1 protocol. This
+             * parameter expects a value of type java.lang.Boolean. If this
+             * parameter is not set, HttpClient will not attempt to use the
+             * handshake.
+             */
             HttpProtocolParams.setUseExpectContinue(params, true);
 
-            // TODO KKr - set on connection manager params, or client params?
+            /*
+             * CoreProtocolPNames.WAIT_FOR_CONTINUE=
+             * 'http.protocol.wait-for-continue': defines the maximum period of time
+             * in milliseconds the client should spend waiting for a 100-continue
+             * response. This parameter expects a value of type java.lang.Integer.
+             * If this parameter is not set HttpClient will wait 3 seconds for a
+             * confirmation before resuming the transmission of the request body.
+             */
+            params.setIntParameter(CoreProtocolPNames.WAIT_FOR_CONTINUE, 5000);
+
             CookieSpecParamBean cookieParams = new CookieSpecParamBean(params);
-            cookieParams.setSingleHeader(true);
+            cookieParams.setSingleHeader(false);
 
             // Create and initialize scheme registry
             SchemeRegistry schemeRegistry = new SchemeRegistry();
-            schemeRegistry.register(new Scheme("http", PlainSocketFactory.getSocketFactory(), 80));
+            schemeRegistry.register(new Scheme("http", 80, PlainSocketFactory
+                .getSocketFactory()));
+
             SSLSocketFactory sf = null;
 
             for (String contextName : SSL_CONTEXT_NAMES) {
                 try {
                     SSLContext sslContext = SSLContext.getInstance(contextName);
                     sslContext.init(null, new TrustManager[] { new DummyX509TrustManager(null) }, null);
-                    sf = new SSLSocketFactory(sslContext);
+                    sf = new SSLSocketFactory(sslContext, SSLSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER);
                     break;
                 } catch (NoSuchAlgorithmException e) {
                     LOGGER.debug("SSLContext algorithm not available: " + contextName);
@@ -861,20 +933,24 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
             }
             
             if (sf != null) {
-                sf.setHostnameVerifier(new DummyX509HostnameVerifier());
-                schemeRegistry.register(new Scheme("https", sf, 443));
+                schemeRegistry.register(new Scheme("https", 443, sf));
             } else {
                 LOGGER.warn("No valid SSLContext found for https");
             }
 
-            // Use ThreadSafeClientConnManager since more than one thread will be using the HttpClient.
-            ThreadSafeClientConnManager cm = new ThreadSafeClientConnManager(params, schemeRegistry);
-            _httpClient = new DefaultHttpClient(cm, params);
+            
+            PoolingClientConnectionManager poolingClientConnectionManager = new PoolingClientConnectionManager(
+                schemeRegistry);
+            poolingClientConnectionManager.setMaxTotal(_maxThreads);
+            poolingClientConnectionManager.setDefaultMaxPerRoute(getMaxConnectionsPerHost());
+
+            _httpClient = new DefaultHttpClient(poolingClientConnectionManager,
+                params);
+
             _httpClient.setHttpRequestRetryHandler(new MyRequestRetryHandler(_maxRetryCount));
             _httpClient.setRedirectHandler(new MyRedirectHandler(getRedirectMode()));
             _httpClient.addRequestInterceptor(new MyRequestInterceptor());
             
-            params = _httpClient.getParams();
             // FUTURE KKr - support authentication
             HttpClientParams.setAuthenticating(params, false);
             HttpClientParams.setCookiePolicy(params, CookiePolicy.BEST_MATCH);
@@ -895,7 +971,15 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
             defaultHeaders.add(new BasicHeader(HttpHeaders.ACCEPT, DEFAULT_ACCEPT));
             
             clientParams.setDefaultHeaders(defaultHeaders);
+            
+            ((DefaultHttpClient)_httpClient).setKeepAliveStrategy(new MyConnectionKeepAliveStrategy());
+        
+            monitor = new IdleConnectionMonitorThread(poolingClientConnectionManager);
+            monitor.start();
+
+            
         }
+      }
     }
 
     @Override
@@ -903,5 +987,11 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         // TODO Actually try to abort
     }
 
+    @Override
+    protected void finalize() {
+      monitor.interrupt();
+      _httpClient.getConnectionManager().shutdown();
+      _httpClient=null;
+    }
 
 }
