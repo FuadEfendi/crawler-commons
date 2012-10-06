@@ -129,12 +129,10 @@ public class SiteMapParser {
             if (line.length() > 0 && i <= MAX_URLS) {
                 try {
                     URL url = new URL(line);
-                    if (urlIsLegal(textSiteMap.getBaseUrl(), url.toString())) {
-                        LOG.debug("  " + i + ". " + url);
-                        i++;
-                        SiteMapURL surl = new SiteMapURL(url);
-                        textSiteMap.addSiteMapUrl(surl);
-                    }
+                    LOG.debug("  " + i + ". " + url);
+                    i++;
+                    SiteMapURL surl = new SiteMapURL(url);
+                    textSiteMap.addSiteMapUrl(surl);
                 } catch (MalformedURLException e) {
                     LOG.debug("Bad URL [" + line + "].");
                 }
@@ -245,11 +243,9 @@ public class SiteMapParser {
                     String changeFreq = getElementValue(elem, "changefreq");
                     String priority = getElementValue(elem, "priority");
 
-                    if (urlIsLegal(sitemap.getBaseUrl(), url.toString())) {
-                        SiteMapURL sUrl = new SiteMapURL(url.toString(), lastMod, changeFreq, priority);
-                        sitemap.addSiteMapUrl(sUrl);
-                        LOG.debug("  " + (i + 1) + ". " + sUrl);
-                    }
+                    SiteMapURL sUrl = new SiteMapURL(url.toString(), lastMod, changeFreq, priority);
+                    sitemap.addSiteMapUrl(sUrl);
+                    LOG.debug("  " + (i + 1) + ". " + sUrl);
                 } catch (MalformedURLException e) {
                     // e.printStackTrace();
 
@@ -404,11 +400,9 @@ public class SiteMapParser {
                 try {
                     url = new URL(href);
 
-                    if (urlIsLegal(sitemap.getBaseUrl(), url.toString())) {
-                        SiteMapURL sUrl = new SiteMapURL(url.toString(), lastMod, null, null);
-                        sitemap.addSiteMapUrl(sUrl);
-                        LOG.debug("  " + (i + 1) + ". " + sUrl);
-                    }
+                    SiteMapURL sUrl = new SiteMapURL(url.toString(), lastMod, null, null);
+                    sitemap.addSiteMapUrl(sUrl);
+                    LOG.debug("  " + (i + 1) + ". " + sUrl);
                 } catch (MalformedURLException e) {
                     // Can't create an entry with a bad URL
                     LOG.debug("Bad url: [" + href + "]");
@@ -481,12 +475,9 @@ public class SiteMapParser {
 
                 try {
                     URL url = new URL(link);
-
-                    if (urlIsLegal(sitemap.getBaseUrl(), url.toString())) {
-                        SiteMapURL sUrl = new SiteMapURL(url.toString(), lastMod, null, null);
-                        sitemap.addSiteMapUrl(sUrl);
-                        LOG.debug("  " + (i + 1) + ". " + sUrl);
-                    }
+                    SiteMapURL sUrl = new SiteMapURL(url.toString(), lastMod, null, null);
+                    sitemap.addSiteMapUrl(sUrl);
+                    LOG.debug("  " + (i + 1) + ". " + sUrl);
                 } catch (MalformedURLException e) {
                     // Can't create an entry with a bad URL
                     LOG.debug("Bad url: [" + link + "]");
@@ -533,30 +524,6 @@ public class SiteMapParser {
         }
 
         return null;
-    }
-
-    /**
-     * See if testUrl is under sitemapUrl. Only URLs under sitemapUrl are legal.
-     * Both URLs are first converted to lowercase before the comparison is made
-     * (this could be an issue on web servers that are case sensitive).
-     * 
-     * @param sitemapUrl
-     * @param testUrl
-     * @return true if testUrl is under sitemapUrl, false otherwise
-     */
-    private boolean urlIsLegal(String sitemapBaseUrl, String testUrl) {
-
-        boolean ret = false;
-
-        // Don't try a comparison if the URL is too short to match
-        if (sitemapBaseUrl != null && sitemapBaseUrl.length() <= testUrl.length()) {
-            String u = testUrl.substring(0, sitemapBaseUrl.length()).toLowerCase();
-            ret = sitemapBaseUrl.equals(u);
-        }
-
-        LOG.debug("urlIsLegal: " + sitemapBaseUrl + " <= " + testUrl + " ? " + ret);
-
-        return ret;
     }
 
 }

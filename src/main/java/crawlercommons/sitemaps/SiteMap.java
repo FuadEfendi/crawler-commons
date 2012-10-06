@@ -25,14 +25,6 @@ import java.util.Hashtable;
 
 public class SiteMap extends AbstractSiteMap {
 
-
-    /**
-     * The base URL for the Sitemap is where the Sitemap was found If found at
-     * http://foo.org/abc/sitemap.xml then baseUrl is http://foo.org/abc/
-     * Sitemaps can only contain URLs that are under the base URL.
-     */
-    private String baseUrl;
-
     /** URLs found in this Sitemap */
     private Hashtable<String, SiteMapURL> urlList;
 
@@ -75,7 +67,6 @@ public class SiteMap extends AbstractSiteMap {
      */
     private void setUrl(URL url) {
         this.url = url;
-        setBaseUrl(url);
     }
 
     /**
@@ -85,43 +76,16 @@ public class SiteMap extends AbstractSiteMap {
     private void setUrl(String url) {
         try {
             this.url = new URL(url);
-
-            setBaseUrl(this.url);
         } catch (MalformedURLException e) {
             this.url = null;
         }
     }
-
 
     public String toString() {
         String s = "url=\"" + url + "\",lastMod=";
         s += (getLastModified() == null) ? "null" : SiteMap.getFullDateFormat().format(getLastModified());
         s += ",type=" + getType() + ",processed=" + isProcessed() + ",urlListSize=" + urlList.size();
         return s;
-    }
-
-
-    /**
-     * This is private because only once we know the Sitemap's URL can we
-     * determine the base URL.
-     * 
-     * @param sitemapUrl
-     */
-    private void setBaseUrl(URL sitemapUrl) {
-        baseUrl = sitemapUrl.toString().toLowerCase();
-
-        // baseUrl = "http://foo.org/abc/sitemap.xml";
-
-        // Remove everything back to last slash.
-        // So http://foo.org/abc/sitemap.xml becomes http://foo.org/abc/
-        baseUrl = baseUrl.replaceFirst("/[^/]*$", "/");
-    }
-
-    /**
-     * @return the baseUrl for this Sitemap.
-     */
-    public String getBaseUrl() {
-        return baseUrl;
     }
 
     /**
