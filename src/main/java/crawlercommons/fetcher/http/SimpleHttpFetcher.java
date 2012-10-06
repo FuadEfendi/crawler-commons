@@ -57,6 +57,7 @@ import org.apache.http.HttpVersion;
 import org.apache.http.NoHttpResponseException;
 import org.apache.http.ProtocolException;
 import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.CookieStore;
 import org.apache.http.client.HttpRequestRetryHandler;
 import org.apache.http.client.RedirectException;
 import org.apache.http.client.methods.HttpGet;
@@ -65,6 +66,7 @@ import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.client.params.ClientParamBean;
 import org.apache.http.client.params.CookiePolicy;
 import org.apache.http.client.params.HttpClientParams;
+import org.apache.http.client.protocol.ClientContext;
 import org.apache.http.conn.ClientConnectionManager;
 import org.apache.http.conn.ConnectionKeepAliveStrategy;
 import org.apache.http.conn.ConnectionPoolTimeoutException;
@@ -73,8 +75,11 @@ import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.scheme.SchemeRegistry;
 import org.apache.http.conn.ssl.SSLSocketFactory;
 import org.apache.http.cookie.params.CookieSpecParamBean;
+import org.apache.http.impl.client.BasicCookieStore;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.impl.client.DefaultRedirectHandler;
+import org.apache.http.impl.client.DefaultRedirectStrategy;
+import org.apache.http.impl.client.RedirectLocations;
 import org.apache.http.impl.conn.PoolingClientConnectionManager;
 import org.apache.http.impl.conn.tsccm.ThreadSafeClientConnManager;
 import org.apache.http.message.BasicHeader;
@@ -84,6 +89,7 @@ import org.apache.http.params.CoreProtocolPNames;
 import org.apache.http.params.HttpConnectionParams;
 import org.apache.http.params.HttpParams;
 import org.apache.http.params.HttpProtocolParams;
+import org.apache.http.protocol.BasicHttpContext;
 import org.apache.http.protocol.ExecutionContext;
 import org.apache.http.protocol.HTTP;
 import org.apache.http.protocol.HttpContext;
@@ -145,9 +151,13 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
   private static final int DEFAULT_KEEP_ALIVE_DURATION = 5000;
 
   private IdleConnectionMonitorThread monitor;
-  
-  // ThreadLocal replacement to traditional HttpContext
-  private static LocalHttpContext context = new LocalHttpContext();
+
+  private ThreadLocal<CookieStore> localCookieStore = new ThreadLocal<CookieStore>() {
+    protected CookieStore initialValue() {
+      CookieStore cookieStore = new LocalCookieStore();
+      return cookieStore;
+    }
+  };
 
 	
     private static final String SSL_CONTEXT_NAMES[] = {
@@ -226,19 +236,19 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
      * Handler to record last permanent redirect (if any) in context.
      *
      */
-    private static class MyRedirectHandler extends DefaultRedirectHandler {
+    private static class MyRedirectStrategy extends DefaultRedirectStrategy {
     	
         private RedirectMode _redirectMode;
         
-		public MyRedirectHandler(RedirectMode redirectMode) {
+		public MyRedirectStrategy(RedirectMode redirectMode) {
     		super();
     		
     		_redirectMode = redirectMode;
     	}
     	
     	@Override
-    	public URI getLocationURI(HttpResponse response, HttpContext context) throws ProtocolException {
-    	    URI result = super.getLocationURI(response, context);
+    	public URI getLocationURI( final HttpRequest request, final HttpResponse response, final HttpContext context) throws ProtocolException {
+    	    URI result = super.getLocationURI(request, response, context);
     	    
     	    // HACK - some sites return a redirect with an explicit port number that's the same as
     	    // the default port (e.g. 80 for http), and then when you use this to make the next
@@ -388,6 +398,11 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                 // Optionally, close connections
                 // that have been idle longer than 30 sec
                 connMgr.closeIdleConnections(30, TimeUnit.SECONDS);
+                try {
+                  Thread.currentThread().sleep(30000);
+                } catch (InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                }
             }
         }      
     }
@@ -523,7 +538,13 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         String contentType = "";
         String mimeType = "";
         String hostAddress = null;
-        
+
+        // Create a local instance of cookie store, and bind to local context
+        // Without this we get killed w/lots of threads, due to sync() on single cookie store.
+        HttpContext localContext = new BasicHttpContext();
+        CookieStore cookieStore = localCookieStore.get();
+        localContext.setAttribute(ClientContext.COOKIE_STORE, cookieStore);
+
         StringBuilder fetchTrace = null;
         if (LOGGER.isTraceEnabled()) {
             fetchTrace = new StringBuilder("Fetched url: " + url);
@@ -533,7 +554,8 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
             request.setURI(new URI(url));
             
             readStartTime = System.currentTimeMillis();
-            response = _httpClient.execute(request, context.get());
+ 
+            response = _httpClient.execute(request, localContext);
 
             Header[] headers = response.getAllHeaders();
             for (Header header : headers) {
@@ -557,19 +579,19 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                 throw new HttpFetchException(url, "Error fetching " + url, httpStatus, headerMap);
             }
 
-            redirectedUrl = extractRedirectedUrl(url, context.get());
+            redirectedUrl = extractRedirectedUrl(url, localContext);
 
-            URI permRedirectUri = (URI)context.get().getAttribute(PERM_REDIRECT_CONTEXT_KEY);
+            URI permRedirectUri = (URI)localContext.getAttribute(PERM_REDIRECT_CONTEXT_KEY);
             if (permRedirectUri != null) {
                 newBaseUrl = permRedirectUri.toURL().toExternalForm();
             }
 
-            Integer redirects = (Integer)context.get().getAttribute(REDIRECT_COUNT_CONTEXT_KEY);
+            Integer redirects = (Integer)localContext.getAttribute(REDIRECT_COUNT_CONTEXT_KEY);
             if (redirects != null) {
                 numRedirects = redirects.intValue();
             }
             
-            hostAddress = (String)(context.get().getAttribute(HOST_ADDRESS));
+            hostAddress = (String)(localContext.getAttribute(HOST_ADDRESS));
             if (hostAddress == null) {
                 throw new UrlFetchException(url, "Host address not saved in context");
             }
@@ -611,22 +633,14 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 
                 throw new RedirectFetchException(url, redirectUrl, mre.getReason());
             } else if (e.getCause() instanceof RedirectException) {
-                throw new RedirectFetchException(url, extractRedirectedUrl(url, context.get()), RedirectExceptionReason.TOO_MANY_REDIRECTS);
+              e.printStackTrace();
+                throw new RedirectFetchException(url, extractRedirectedUrl(url, localContext), RedirectExceptionReason.TOO_MANY_REDIRECTS);
             } else {
                 throw new IOFetchException(url, e);
             }
         } catch (IOException e) {
             // Oleg guarantees that no abort is needed in the case of an IOException
             needAbort = false;
-            
-            if (e instanceof ConnectionPoolTimeoutException) {
-                // Should never happen, so let's dump some info about the connection pool.
-                ThreadSafeClientConnManager cm = (ThreadSafeClientConnManager)_httpClient.getConnectionManager();
-                int numConnections = cm.getConnectionsInPool();
-                cm.closeIdleConnections(0, TimeUnit.MILLISECONDS);
-                LOGGER.error(String.format("Got ConnectionPoolTimeoutException: %d connections before, %d after idle close", numConnections, cm.getConnectionsInPool()));
-            }
-            
             throw new IOFetchException(url, e);
         } catch (URISyntaxException e) {
             throw new UrlFetchException(url, e.getMessage());
@@ -948,7 +962,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                 params);
 
             _httpClient.setHttpRequestRetryHandler(new MyRequestRetryHandler(_maxRetryCount));
-            _httpClient.setRedirectHandler(new MyRedirectHandler(getRedirectMode()));
+            _httpClient.setRedirectStrategy(new MyRedirectStrategy(getRedirectMode()));
             _httpClient.addRequestInterceptor(new MyRequestInterceptor());
             
             // FUTURE KKr - support authentication
