@@ -247,6 +247,12 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
             // fail with a circular redirect error. Avoid that by converting the
             // port number to
             // -1 in that case.
+            //
+            // Detailed scenrio:
+            // http://www.test.com/MyPage ->
+            // http://www.test.com:80/MyRedirectedPage ->
+            // http://www.test.com/MyRedirectedPage
+            // We can save bandwidth:
             if (result.getScheme().equalsIgnoreCase("http") && (result.getPort() == 80)) {
                 try {
                     result = new URI(result.getScheme(), result.getUserInfo(), result.getHost(), -1, result.getPath(), result.getQuery(), result.getFragment());
@@ -275,6 +281,41 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                 RedirectExceptionReason reason = isPermRedirect ? RedirectExceptionReason.PERM_REDIRECT_DISALLOWED : RedirectExceptionReason.TEMP_REDIRECT_DISALLOWED;
                 throw new MyRedirectException("RedirectMode disallowed redirect: " + _redirectMode, result, reason);
             }
+
+            RedirectExceptionReason reason = null;
+
+            if (_redirectMode == RedirectMode.FOLLOW_NONE) {
+                switch (statusCode) {
+                    case HttpStatus.SC_MOVED_TEMPORARILY:
+                    reason = RedirectExceptionReason.TEMP_REDIRECT_DISALLOWED;
+                        break;
+                    case HttpStatus.SC_MOVED_PERMANENTLY:
+                    reason = RedirectExceptionReason.PERM_REDIRECT_DISALLOWED;
+                        break;
+                    case HttpStatus.SC_TEMPORARY_REDIRECT:
+                    reason = RedirectExceptionReason.TEMP_REDIRECT_DISALLOWED;
+                        break;
+                    case HttpStatus.SC_SEE_OTHER:
+                    reason = RedirectExceptionReason.SEE_OTHER_DISALLOWED;
+                        break;
+                    default:
+                }
+            }
+
+            if (_redirectMode == RedirectMode.FOLLOW_TEMP) {
+                switch (statusCode) {
+                    case HttpStatus.SC_MOVED_PERMANENTLY:
+                    reason = RedirectExceptionReason.PERM_REDIRECT_DISALLOWED;
+                        break;
+                    case HttpStatus.SC_SEE_OTHER:
+                    reason = RedirectExceptionReason.SEE_OTHER_DISALLOWED;
+                        break;
+                    default:
+                }
+            }
+
+            if (reason != null)
+                throw new MyRedirectException("RedirectMode disallowed redirect: " + _redirectMode, result, reason);
 
             return result;
         }
