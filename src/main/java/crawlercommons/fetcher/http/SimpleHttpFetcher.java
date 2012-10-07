@@ -538,6 +538,8 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         String contentType = "";
         String mimeType = "";
         String hostAddress = null;
+        int httpStatus = -1;
+        String reasonPhrase = null;
 
         // Create a local instance of cookie store, and bind to local context
         // Without this we get killed w/lots of threads, due to sync() on single cookie store.
@@ -562,7 +564,9 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                 headerMap.add(header.getName(), header.getValue());
             }
 
-            int httpStatus = response.getStatusLine().getStatusCode();
+            httpStatus = response.getStatusLine().getStatusCode();
+            reasonPhrase = response.getStatusLine().getReasonPhrase();
+
             if (LOGGER.isTraceEnabled()) {
                 fetchTrace.append("; status code: " + httpStatus);
                 if (headerMap.get(HttpHeaders.CONTENT_LENGTH) != null) {
@@ -795,7 +799,9 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                                     payload,
                                     newBaseUrl,
                                     numRedirects,
-                                    hostAddress);
+                                    hostAddress,
+                                    httpStatus,
+                                    reasonPhrase);
     }
     
     private boolean isTextMimeType(String mimeType) {
