@@ -275,13 +275,6 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                 context.setAttribute(PERM_REDIRECT_CONTEXT_KEY, result);
             }
 
-            // Based on the redirect mode, decide how we want to handle this.
-            boolean isPermRedirect = statusCode == HttpStatus.SC_MOVED_PERMANENTLY;
-            if ((_redirectMode == RedirectMode.FOLLOW_NONE) || ((_redirectMode == RedirectMode.FOLLOW_TEMP) && isPermRedirect)) {
-                RedirectExceptionReason reason = isPermRedirect ? RedirectExceptionReason.PERM_REDIRECT_DISALLOWED : RedirectExceptionReason.TEMP_REDIRECT_DISALLOWED;
-                throw new MyRedirectException("RedirectMode disallowed redirect: " + _redirectMode, result, reason);
-            }
-
             RedirectExceptionReason reason = null;
 
             if (_redirectMode == RedirectMode.FOLLOW_NONE) {
