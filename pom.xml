@@ -3,7 +3,7 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
 
     <properties>
-        <version.httpclient>4.2.1</version.httpclient>
+        <version.httpclient>4.2.2</version.httpclient>
     </properties>
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.google.code.crawler-commons</groupId>
