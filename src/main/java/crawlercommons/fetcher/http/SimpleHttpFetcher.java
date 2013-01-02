@@ -151,7 +151,8 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 
     private IdleConnectionMonitorThread monitor;
 
-    private ThreadLocal<CookieStore> localCookieStore = new ThreadLocal<CookieStore>() {
+    private final ThreadLocal<CookieStore> localCookieStore = new ThreadLocal<CookieStore>() {
+        @Override
         protected CookieStore initialValue() {
             CookieStore cookieStore = new LocalCookieStore();
             return cookieStore;
@@ -170,28 +171,27 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
     transient private DefaultHttpClient _httpClient;
 
     private static class MyRequestRetryHandler implements HttpRequestRetryHandler {
-        private int _maxRetryCount;
+        private final int _maxRetryCount;
 
-        public MyRequestRetryHandler(int maxRetryCount) {
+        public MyRequestRetryHandler(final int maxRetryCount) {
             _maxRetryCount = maxRetryCount;
         }
 
         @Override
-        public boolean retryRequest(IOException exception, int executionCount, HttpContext context) {
+        public boolean retryRequest(final IOException exception, final int executionCount, final HttpContext context) {
             if (LOGGER.isTraceEnabled()) {
                 LOGGER.trace("Decide about retry #" + executionCount + " for exception " + exception.getMessage());
             }
 
-            if (executionCount >= _maxRetryCount) {
+            if (executionCount >= _maxRetryCount)
                 // Do not retry if over max retry count
                 return false;
-            } else if (exception instanceof NoHttpResponseException) {
+            else if (exception instanceof NoHttpResponseException)
                 // Retry if the server dropped connection on us
                 return true;
-            } else if (exception instanceof SSLHandshakeException) {
+            else if (exception instanceof SSLHandshakeException)
                 // Do not retry on SSL handshake exception
                 return false;
-            }
 
             HttpRequest request = (HttpRequest) context.getAttribute(ExecutionContext.HTTP_REQUEST);
             boolean idempotent = !(request instanceof HttpEntityEnclosingRequest);
@@ -202,13 +202,15 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 
     private static class MyRedirectException extends RedirectException {
 
-        private URI _uri;
-        private RedirectExceptionReason _reason;
+        private final URI _uri;
+        private final RedirectExceptionReason _reason;
+        private final int httpStatusCode;
 
-        public MyRedirectException(String message, URI uri, RedirectExceptionReason reason) {
+        public MyRedirectException(final String message, final URI uri, final RedirectExceptionReason reason, final int httpStatusCode) {
             super(message);
             _uri = uri;
             _reason = reason;
+            this.httpStatusCode = httpStatusCode;
         }
 
         public URI getUri() {
@@ -218,6 +220,11 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         public RedirectExceptionReason getReason() {
             return _reason;
         }
+
+        public int getHttpStatusCode() {
+            return httpStatusCode;
+        }
+
     }
 
     /**
@@ -226,9 +233,9 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
      */
     private static class MyRedirectStrategy extends DefaultRedirectStrategy {
 
-        private RedirectMode _redirectMode;
+        private final RedirectMode _redirectMode;
 
-        public MyRedirectStrategy(RedirectMode redirectMode) {
+        public MyRedirectStrategy(final RedirectMode redirectMode) {
             super();
 
             _redirectMode = redirectMode;
@@ -308,7 +315,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
             }
 
             if (reason != null)
-                throw new MyRedirectException("RedirectMode disallowed redirect: " + _redirectMode, result, reason);
+                throw new MyRedirectException("RedirectMode disallowed redirect: " + _redirectMode, result, reason, statusCode);
 
             return result;
         }
@@ -321,7 +328,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
     private static class MyRequestInterceptor implements HttpRequestInterceptor {
 
         @Override
-        public void process(HttpRequest request, HttpContext context) throws HttpException, IOException {
+        public void process(final HttpRequest request, final HttpContext context) throws HttpException, IOException {
 
             HttpInetConnection connection = (HttpInetConnection) (context.getAttribute(ExecutionContext.HTTP_CONNECTION));
 
@@ -335,15 +342,14 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         /**
          * Constructor for DummyX509TrustManager.
          */
-        public DummyX509TrustManager(KeyStore keystore) throws NoSuchAlgorithmException, KeyStoreException {
+        public DummyX509TrustManager(final KeyStore keystore) throws NoSuchAlgorithmException, KeyStoreException {
             super();
             String algo = TrustManagerFactory.getDefaultAlgorithm();
             TrustManagerFactory factory = TrustManagerFactory.getInstance(algo);
             factory.init(keystore);
             TrustManager[] trustmanagers = factory.getTrustManagers();
-            if (trustmanagers.length == 0) {
+            if (trustmanagers.length == 0)
                 throw new NoSuchAlgorithmException(algo + " trust manager not supported");
-            }
             this.standardTrustManager = (X509TrustManager) trustmanagers[0];
         }
 
@@ -351,7 +357,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
          * @see javax.net.ssl.X509TrustManager#checkClientTrusted(X509Certificate[],
          *      String)
          */
-        public boolean isClientTrusted(X509Certificate[] certificates) {
+        public boolean isClientTrusted(final X509Certificate[] certificates) {
             return true;
         }
 
@@ -359,23 +365,26 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
          * @see javax.net.ssl.X509TrustManager#checkServerTrusted(X509Certificate[],
          *      String)
          */
-        public boolean isServerTrusted(X509Certificate[] certificates) {
+        public boolean isServerTrusted(final X509Certificate[] certificates) {
             return true;
         }
 
         /**
          * @see javax.net.ssl.X509TrustManager#getAcceptedIssuers()
          */
+        @Override
         public X509Certificate[] getAcceptedIssuers() {
             return this.standardTrustManager.getAcceptedIssuers();
         }
 
-        public void checkClientTrusted(X509Certificate[] arg0, String arg1) throws CertificateException {
+        @Override
+        public void checkClientTrusted(final X509Certificate[] arg0, final String arg1) throws CertificateException {
             // do nothing
 
         }
 
-        public void checkServerTrusted(X509Certificate[] arg0, String arg1) throws CertificateException {
+        @Override
+        public void checkServerTrusted(final X509Certificate[] arg0, final String arg1) throws CertificateException {
             // do nothing
 
         }
@@ -383,10 +392,10 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 
     public static class MyConnectionKeepAliveStrategy implements ConnectionKeepAliveStrategy {
 
-        public long getKeepAliveDuration(HttpResponse response, HttpContext context) {
-            if (response == null) {
+        @Override
+        public long getKeepAliveDuration(final HttpResponse response, final HttpContext context) {
+            if (response == null)
                 throw new IllegalArgumentException("HTTP response may not be null");
-            }
             HeaderElementIterator it = new BasicHeaderElementIterator(response.headerIterator(HTTP.CONN_KEEP_ALIVE));
             while (it.hasNext()) {
                 HeaderElement he = it.nextElement();
@@ -407,7 +416,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 
         private final ClientConnectionManager connMgr;
 
-        public IdleConnectionMonitorThread(ClientConnectionManager connMgr) {
+        public IdleConnectionMonitorThread(final ClientConnectionManager connMgr) {
             super();
             this.connMgr = connMgr;
             this.setDaemon(true);
@@ -430,11 +439,11 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         }
     }
 
-    public SimpleHttpFetcher(UserAgent userAgent) {
+    public SimpleHttpFetcher(final UserAgent userAgent) {
         this(DEFAULT_MAX_THREADS, userAgent);
     }
 
-    public SimpleHttpFetcher(int maxThreads, UserAgent userAgent) {
+    public SimpleHttpFetcher(final int maxThreads, final UserAgent userAgent) {
         super(maxThreads, userAgent);
 
         _httpVersion = HttpVersion.HTTP_1_1;
@@ -451,54 +460,50 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         return _httpVersion;
     }
 
-    public void setHttpVersion(HttpVersion httpVersion) {
+    public void setHttpVersion(final HttpVersion httpVersion) {
         if (_httpClient == null) {
             _httpVersion = httpVersion;
-        } else {
+        } else
             throw new IllegalStateException("Can't change HTTP version after HttpClient has been initialized");
-        }
     }
 
     public int getSocketTimeout() {
         return _socketTimeout;
     }
 
-    public void setSocketTimeout(int socketTimeoutInMs) {
+    public void setSocketTimeout(final int socketTimeoutInMs) {
         if (_httpClient == null) {
             _socketTimeout = socketTimeoutInMs;
-        } else {
+        } else
             throw new IllegalStateException("Can't change socket timeout after HttpClient has been initialized");
-        }
     }
 
     public int getConnectionTimeout() {
         return _connectionTimeout;
     }
 
-    public void setConnectionTimeout(int connectionTimeoutInMs) {
+    public void setConnectionTimeout(final int connectionTimeoutInMs) {
         if (_httpClient == null) {
             _connectionTimeout = connectionTimeoutInMs;
-        } else {
+        } else
             throw new IllegalStateException("Can't change connection timeout after HttpClient has been initialized");
-        }
     }
 
     public int getMaxRetryCount() {
         return _maxRetryCount;
     }
 
-    public void setMaxRetryCount(int maxRetryCount) {
+    public void setMaxRetryCount(final int maxRetryCount) {
         _maxRetryCount = maxRetryCount;
     }
 
     @Override
-    public FetchedResult get(String url, Payload payload) throws BaseFetchException {
+    public FetchedResult get(final String url, final Payload payload) throws BaseFetchException {
         try {
             URL realUrl = new URL(url);
             String protocol = realUrl.getProtocol();
-            if (!protocol.equals("http") && !protocol.equals("https")) {
+            if (!protocol.equals("http") && !protocol.equals("https"))
                 throw new BadProtocolFetchException(url);
-            }
         } catch (MalformedURLException e) {
             throw new UrlFetchException(url, e.getMessage());
         }
@@ -506,7 +511,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         return request(new HttpGet(), url, payload);
     }
 
-    private FetchedResult request(HttpRequestBase request, String url, Payload payload) throws BaseFetchException {
+    private FetchedResult request(final HttpRequestBase request, final String url, final Payload payload) throws BaseFetchException {
         init();
 
         try {
@@ -531,11 +536,11 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         }
     }
 
-    public FetchedResult fetch(String url) throws BaseFetchException {
+    public FetchedResult fetch(final String url) throws BaseFetchException {
         return fetch(new HttpGet(), url, new Payload());
     }
 
-    public FetchedResult fetch(HttpRequestBase request, String url, Payload payload) throws BaseFetchException {
+    public FetchedResult fetch(final HttpRequestBase request, final String url, final Payload payload) throws BaseFetchException {
         init();
 
         try {
@@ -548,7 +553,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         }
     }
 
-    private FetchedResult doRequest(HttpRequestBase request, String url, Payload payload) throws BaseFetchException {
+    private FetchedResult doRequest(final HttpRequestBase request, final String url, final Payload payload) throws BaseFetchException {
         LOGGER.trace("Fetching " + url);
 
         HttpResponse response;
@@ -602,11 +607,10 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                 }
             }
 
-            if ((httpStatus < 200) || (httpStatus >= 300)) {
+            if ((httpStatus < 200) || (httpStatus >= 300))
                 // We can't just check against SC_OK, as some wackos return 201,
                 // 202, etc
                 throw new HttpFetchException(url, "Error fetching " + url, httpStatus, headerMap);
-            }
 
             redirectedUrl = extractRedirectedUrl(url, localContext);
 
@@ -621,9 +625,8 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
             }
 
             hostAddress = (String) (localContext.getAttribute(HOST_ADDRESS));
-            if (hostAddress == null) {
+            if (hostAddress == null)
                 throw new UrlFetchException(url, "Host address not saved in context");
-            }
 
             Header cth = response.getFirstHeader(HttpHeaders.CONTENT_TYPE);
             if (cth != null) {
@@ -643,9 +646,8 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
             mimeType = getMimeTypeFromContentType(contentType);
             Set<String> mimeTypes = getValidMimeTypes();
             if ((mimeTypes != null) && (mimeTypes.size() > 0)) {
-                if (!mimeTypes.contains(mimeType)) {
+                if (!mimeTypes.contains(mimeType))
                     throw new AbortedFetchException(url, "Invalid mime-type: " + mimeType, AbortedFetchReason.INVALID_MIMETYPE);
-                }
             }
 
             needAbort = false;
@@ -667,13 +669,12 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                     LOGGER.warn("Invalid URI saved during redirect handling: " + mre.getUri());
                 }
 
-                throw new RedirectFetchException(url, redirectUrl, mre.getReason());
+                throw new RedirectFetchException(url, redirectUrl, mre.getReason(), mre.httpStatusCode);
             } else if (e.getCause() instanceof RedirectException) {
                 e.printStackTrace();
-                throw new RedirectFetchException(url, extractRedirectedUrl(url, localContext), RedirectExceptionReason.TOO_MANY_REDIRECTS);
-            } else {
+                throw new RedirectFetchException(url, extractRedirectedUrl(url, localContext), RedirectExceptionReason.TOO_MANY_REDIRECTS, 399);
+            } else
                 throw new IOFetchException(url, e);
-            }
         } catch (IOException e) {
             // Oleg guarantees that no abort is needed in the case of an
             // IOException
@@ -749,14 +750,12 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                     // Don't bail on the first read cycle, as we can get a
                     // hiccup starting out.
                     // Also don't bail if we've read everything we need.
-                    if ((readRequests > 1) && (totalRead < targetLength) && (readRate < minResponseRate)) {
+                    if ((readRequests > 1) && (totalRead < targetLength) && (readRate < minResponseRate))
                         throw new AbortedFetchException(url, "Slow response rate of " + readRate + " bytes/sec", AbortedFetchReason.SLOW_RESPONSE_RATE);
-                    }
 
                     // Check to see if we got interrupted.
-                    if (Thread.interrupted()) {
+                    if (Thread.interrupted())
                         throw new AbortedFetchException(url, AbortedFetchReason.INTERRUPTED);
-                    }
                 }
 
                 content = out.toByteArray();
@@ -771,9 +770,8 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         }
 
         // Toss truncated image content.
-        if ((truncated) && (!isTextMimeType(mimeType))) {
+        if ((truncated) && (!isTextMimeType(mimeType)))
             throw new AbortedFetchException(url, "Truncated image", AbortedFetchReason.CONTENT_SIZE);
-        }
 
         // Now see if we need to uncompress the content.
         String contentEncoding = headerMap.get(HttpHeaders.CONTENT_ENCODING);
@@ -790,14 +788,14 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
             //
             try {
                 if ("gzip".equals(contentEncoding) || "x-gzip".equals(contentEncoding)) {
-                    if (truncated) {
+                    if (truncated)
                         throw new AbortedFetchException(url, "Truncated compressed data", AbortedFetchReason.CONTENT_SIZE);
-                    } else {
+                    else {
                         ExpandedResult expandedResult = EncodingUtils.processGzipEncoded(content, maxContentSize);
                         truncated = expandedResult.isTruncated();
-                        if ((truncated) && (!isTextMimeType(mimeType))) {
+                        if ((truncated) && (!isTextMimeType(mimeType)))
                             throw new AbortedFetchException(url, "Truncated decompressed image", AbortedFetchReason.CONTENT_SIZE);
-                        } else {
+                        else {
                             content = expandedResult.getExpanded();
                             if (LOGGER.isTraceEnabled()) {
                                 fetchTrace.append("; unzipped to " + content.length + " bytes");
@@ -827,16 +825,15 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
                         reasonPhrase);
     }
 
-    private boolean isTextMimeType(String mimeType) {
+    private boolean isTextMimeType(final String mimeType) {
         for (String textContentType : TEXT_MIME_TYPES) {
-            if (textContentType.equals(mimeType)) {
+            if (textContentType.equals(mimeType))
                 return true;
-            }
         }
         return false;
     }
 
-    private String extractRedirectedUrl(String url, HttpContext localContext) {
+    private String extractRedirectedUrl(final String url, final HttpContext localContext) {
         // This was triggered by HttpClient with the redirect count was
         // exceeded.
         HttpHost host = (HttpHost) localContext.getAttribute(ExecutionContext.HTTP_TARGET_HOST);
@@ -854,7 +851,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         }
     }
 
-    private static void safeClose(Closeable o) {
+    private static void safeClose(final Closeable o) {
         if (o != null) {
             try {
                 o.close();
@@ -864,7 +861,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
         }
     }
 
-    private static void safeAbort(boolean needAbort, HttpRequestBase request) {
+    private static void safeAbort(final boolean needAbort, final HttpRequestBase request) {
         if (needAbort && (request != null)) {
             try {
                 request.abort();
@@ -1022,7 +1019,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 
                 clientParams.setDefaultHeaders(defaultHeaders);
 
-                ((DefaultHttpClient) _httpClient).setKeepAliveStrategy(new MyConnectionKeepAliveStrategy());
+                _httpClient.setKeepAliveStrategy(new MyConnectionKeepAliveStrategy());
 
                 monitor = new IdleConnectionMonitorThread(poolingClientConnectionManager);
                 monitor.start();
