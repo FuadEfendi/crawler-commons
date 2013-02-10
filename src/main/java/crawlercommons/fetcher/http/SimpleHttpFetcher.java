@@ -999,7 +999,7 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 
                 // FUTURE KKr - support authentication
                 HttpClientParams.setAuthenticating(params, false);
-                HttpClientParams.setCookiePolicy(params, CookiePolicy.BEST_MATCH);
+                HttpClientParams.setCookiePolicy(params, CookiePolicy.BROWSER_COMPATIBILITY);
 
                 ClientParamBean clientParams = new ClientParamBean(params);
                 if (getMaxRedirects() == 0) {
