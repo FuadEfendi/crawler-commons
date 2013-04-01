@@ -23,6 +23,7 @@ import java.security.InvalidParameterException;
 import org.apache.tika.metadata.Metadata;
 
 public class FetchedResult implements Serializable {
+    private static final long serialVersionUID = 1L;
     private final String _baseUrl;
     private final String _fetchedUrl;
     private final long _fetchTime;
