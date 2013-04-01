@@ -17,11 +17,12 @@
 
 package crawlercommons.fetcher;
 
+import java.io.Serializable;
 import java.security.InvalidParameterException;
 
 import org.apache.tika.metadata.Metadata;
 
-public class FetchedResult {
+public class FetchedResult implements Serializable {
     private final String _baseUrl;
     private final String _fetchedUrl;
     private final long _fetchTime;
