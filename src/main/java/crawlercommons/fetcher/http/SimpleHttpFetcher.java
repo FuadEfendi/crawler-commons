@@ -161,8 +161,9 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 
     private static final String SSL_CONTEXT_NAMES[] = { "TLS", "Default", "SSL", };
 
-    private static final String TEXT_MIME_TYPES[] = { "text/html", "application/x-asp", "application/xhtml+xml", "application/vnd.wap.xhtml+xml", };
-
+    private static final String TEXT_MIME_TYPES[] = { "text/html", "application/x-asp", "application/xhtml+xml", "application/vnd.wap.xhtml+xml", 
+        "application/rss+xml", "application/rdf+xml", "application/atom+xml", "application/xml", "text/xml" };
+    
     private HttpVersion _httpVersion;
     private int _socketTimeout;
     private int _connectionTimeout;
