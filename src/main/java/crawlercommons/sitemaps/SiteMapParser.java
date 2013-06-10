@@ -86,7 +86,7 @@ public class SiteMapParser {
                         || contentType.contains("gzip/document") || contentType.contains("application/octet-stream")) {
             try {
                 return processGzip(url, content);
-            } catch (java.util.zip.ZipException e) {
+            } catch (Exception e) {
                 return processXml(url, content);
             }
         }
