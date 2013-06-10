@@ -84,7 +84,11 @@ public class SiteMapParser {
         } else if (url.getPath().endsWith(".gz") || contentType.contains("application/gzip") || contentType.contains("application/x-gzip") || contentType.contains("application/x-gunzip")
                         || contentType.contains("application/gzipped") || contentType.contains("application/gzip-compressed") || contentType.contains("application/x-compress")
                         || contentType.contains("gzip/document") || contentType.contains("application/octet-stream")) {
-            return processGzip(url, content);
+            try {
+                return processGzip(url, content);
+            } catch (java.util.zip.ZipException e) {
+                return processXml(url, content);
+            }
         }
         throw new UnknownFormatException("Unknown format " + contentType + " at " + url);
     }

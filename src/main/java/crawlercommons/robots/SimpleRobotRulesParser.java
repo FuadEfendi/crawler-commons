@@ -225,7 +225,7 @@ public class SimpleRobotRulesParser extends BaseRobotsParser {
     private static RobotToken tokenize(String line) {
         for (String prefix : DIRECTIVE_PREFIX.keySet()) {
             int prefixLength = prefix.length();
-            if (line.startsWith(prefix)) {
+            if (line.toLowerCase().startsWith(prefix)) {
                 RobotDirective directive = DIRECTIVE_PREFIX.get(prefix);
                 String dataPortion = line.substring(prefixLength);
 
@@ -378,12 +378,12 @@ public class SimpleRobotRulesParser extends BaseRobotsParser {
                 line = line.substring(0, hashPos);
             }
             
-            line = line.trim().toLowerCase();
-            if (line.length() == 0) {
+            String line2 = line.trim().toLowerCase();
+            if (line2.length() == 0) {
                 continue;
             }
          
-            RobotToken token = tokenize(line);
+            RobotToken token = tokenize(line2);
             switch (token.getDirective()) {
                 case USER_AGENT:
                     keepGoing = handleUserAgent(parseState, token);
@@ -402,7 +402,7 @@ public class SimpleRobotRulesParser extends BaseRobotsParser {
                     break;
                     
                 case SITEMAP:
-                    keepGoing = handleSitemap(parseState, token);
+                    keepGoing = handleSitemap(parseState,  tokenize(line.trim())); // 'line' is non-lowercased; line2 is lowercased
                     break;
                     
                 case HTTP:
@@ -619,7 +619,10 @@ public class SimpleRobotRulesParser extends BaseRobotsParser {
                 }
             }
         } catch (Exception e) {
+            
             reportWarning("Invalid URL with sitemap directive: " + sitemap, state.getUrl());
+            LOGGER.error("", e);
+            
         }
         
         return true;
