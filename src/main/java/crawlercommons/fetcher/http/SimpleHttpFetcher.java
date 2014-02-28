@@ -40,6 +40,7 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
+import org.apache.http.ConnectionReuseStrategy;
 import org.apache.http.Header;
 import org.apache.http.HeaderElement;
 import org.apache.http.HeaderElementIterator;
@@ -74,6 +75,7 @@ import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.scheme.SchemeRegistry;
 import org.apache.http.conn.ssl.SSLSocketFactory;
 import org.apache.http.cookie.params.CookieSpecParamBean;
+import org.apache.http.impl.NoConnectionReuseStrategy;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.impl.client.DefaultRedirectStrategy;
 import org.apache.http.impl.conn.PoolingClientConnectionManager;
@@ -1020,8 +1022,9 @@ public class SimpleHttpFetcher extends BaseHttpFetcher {
 
                 clientParams.setDefaultHeaders(defaultHeaders);
 
-                _httpClient.setKeepAliveStrategy(new MyConnectionKeepAliveStrategy());
-
+                //_httpClient.setKeepAliveStrategy(new MyConnectionKeepAliveStrategy());
+                _httpClient.setReuseStrategy(new NoConnectionReuseStrategy());
+                
                 monitor = new IdleConnectionMonitorThread(poolingClientConnectionManager);
                 monitor.start();
 
